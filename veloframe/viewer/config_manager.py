@@ -17,13 +17,13 @@ class Config:
         'blur_zoom_background': False,
         'show_metadata': True,
         'metadata_opacity': 70,
-        'metadata_font': 'Segoe UI',
+        'metadata_font': 'segoeui.ttf',
         'metadata_point_size': 20,
         # Clock overlay settings
         'show_clock': True,
         'clock_position': 'top-center',
         'clock_opacity': 30,
-        'clock_font': 'Segoe UI',
+        'clock_font': 'segoeui.ttf',
         'clock_point_size': 12,
         'clock_format': 'HH:mm'
     }
