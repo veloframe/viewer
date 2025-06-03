@@ -103,15 +103,27 @@ class PhotoFrame(QMainWindow):
             
         except Exception as e:
             print(f"Error showing photo {current_photo}: {e}")
-            # To prevent infinite recursion, don't call next_photo if we're in a cycle
-            if not hasattr(self, '_error_recovery'):
-                self._error_recovery = True
-                self.photo_file_set.next_photo()
-                self.show_photo(skip_transition)
-                delattr(self, '_error_recovery')
-            else:
-                print("Error recovery failed, skipping to next photo")
-                self.photo_file_set.next_photo()
+            # Improved error recovery to prevent infinite recursion
+            # Move to the next photo
+            self.photo_file_set.next_photo()
+            
+            # Set a maximum number of consecutive errors to prevent infinite loops
+            if not hasattr(self, '_error_count'):
+                self._error_count = 0
+            
+            self._error_count += 1
+            
+            # If we've had too many errors in a row, reset and stop trying
+            if self._error_count > 5:
+                print("Too many consecutive errors. Stopping slideshow.")
+                self._error_count = 0
+                # Reset timer to try again after a delay
+                self.timer.stop()
+                self.timer.start(self.display_time)
+                return
+                
+            # Try the next photo without transition
+            self.show_photo(skip_transition=True)
     
     def next_photo(self, skip_transition=False):
         self.photo_file_set.next_photo()
