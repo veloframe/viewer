@@ -12,7 +12,7 @@ class Config:
     DEFAULTS = {
         'photos_directory': str(Path.home() / 'Pictures'),
         'display_time': '10s',
-        'transition_time': 1.0,
+        'transition_time': '1s',
         'random_order': True,
         'blur_zoom_background': False,
         'show_metadata': True,
