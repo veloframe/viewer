@@ -2,6 +2,7 @@
 Core functionality for the photo display system.
 """
 from PySide6.QtGui import QPixmap
+import gc
 
 from .photo_ui_components import UIComponentManager
 from .photo_transition_manager import TransitionManager
@@ -40,6 +41,10 @@ class PhotoDisplay:
         self.current_photo_details = None
         self.next_photo_details = None
         self.in_transition = False
+        
+        # Memory management
+        self._cleanup_counter = 0
+        self._cleanup_threshold = 20  # Trigger cleanup every 20 photo changes
     
     def show_single_photo(self, photo_path, screen_size, apply_blur, show_metadata):
         """Display a single photo.
@@ -85,8 +90,8 @@ class PhotoDisplay:
             # If we were transitioning to a different photo than the one we're now
             # transitioning to, we need to clean up resources
             if self.next_photo_details and next_photo_details != self.next_photo_details:
-                # Clean up any resources from the previous next_photo_details if needed
-                pass
+                # Clean up any resources from the previous next_photo_details
+                self._cleanup_photo_details(self.next_photo_details)
         
         # Store state
         self.next_photo_details = next_photo_details
@@ -99,6 +104,11 @@ class PhotoDisplay:
             duration,
             self._finalize_transition
         )
+        
+        # Increment cleanup counter and check if we need to perform cleanup
+        self._cleanup_counter += 1
+        if self._cleanup_counter >= self._cleanup_threshold:
+            self._perform_memory_cleanup()
     
     def _display_photo_immediately(self, photo_details):
         """Display photo(s) immediately without transition.
@@ -106,6 +116,10 @@ class PhotoDisplay:
         Args:
             photo_details: Dictionary with photo details
         """
+        # If we have current photo details, clean them up before replacing
+        if self.current_photo_details:
+            self._cleanup_photo_details(self.current_photo_details)
+        
         # Reset the scene rectangle
         screen_size = photo_details['screen_size']
         self.ui_manager.set_scene_rect(screen_size[0], screen_size[1])
@@ -187,6 +201,11 @@ class PhotoDisplay:
         self.current_photo_details = photo_details
         self.next_photo_details = None
         self.in_transition = False
+        
+        # Increment cleanup counter and check if we need to perform cleanup
+        self._cleanup_counter += 1
+        if self._cleanup_counter >= self._cleanup_threshold:
+            self._perform_memory_cleanup()
     
     def _update_metadata_mid_transition(self, value):
         """Update metadata overlays at the middle of the transition.
@@ -210,6 +229,10 @@ class PhotoDisplay:
         # Swap layers in UI manager
         self.ui_manager.swap_layers(self.next_photo_details['mode'])
         
+        # Clean up the old photo details
+        if self.current_photo_details:
+            self._cleanup_photo_details(self.current_photo_details)
+        
         # Update current photo details
         self.current_photo_details = self.next_photo_details
         self.next_photo_details = None
@@ -219,3 +242,41 @@ class PhotoDisplay:
         
         # Show clock if enabled
         self.clock_manager.show_overlay()
+    
+    def _cleanup_photo_details(self, photo_details):
+        """Clean up resources associated with photo details.
+        
+        This helps prevent memory leaks by removing references to large objects.
+        
+        Args:
+            photo_details: Dictionary with photo details to clean up
+        """
+        if not photo_details:
+            return
+            
+        # We don't actually delete the pixmaps here since they're managed by Qt
+        # and might still be in use by the UI. Instead, we remove our references
+        # to them to allow Qt to garbage collect them when appropriate.
+        
+        # Remove references to large objects in the photo details
+        if photo_details['mode'] == 'single':
+            # Clear reference to pixmap
+            if 'pixmap' in photo_details:
+                photo_details['pixmap'] = None
+        else:  # 'pair'
+            # Clear references to pixmaps
+            if 'pixmap1' in photo_details:
+                photo_details['pixmap1'] = None
+            if 'pixmap2' in photo_details:
+                photo_details['pixmap2'] = None
+    
+    def _perform_memory_cleanup(self):
+        """Perform periodic memory cleanup to prevent memory leaks."""
+        # Reset counter
+        self._cleanup_counter = 0
+        
+        # Clear the photo preparation manager's cache
+        self.photo_prep_manager.clear_cache()
+        
+        # Suggest garbage collection
+        gc.collect()

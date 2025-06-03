@@ -1,106 +1,213 @@
 import os
 import sys
+import time
+from typing import Optional
 
-from PySide6.QtWidgets import (QApplication, QMainWindow, QGraphicsScene, QGraphicsView)
-from PySide6.QtCore import (Qt, QTimer)
+from PySide6.QtWidgets import (
+    QMainWindow, QGraphicsView, QGraphicsScene, QFileDialog,
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QMessageBox
+)
+from PySide6.QtCore import Qt, QTimer, QSize, Signal
+from PySide6.QtGui import QAction, QKeyEvent, QResizeEvent
 
-from .config_manager import Config
-from .photo_file_set import PhotoFileSet
+from .config_manager import ConfigManager
 from .photo_display import PhotoDisplay
+from .photo_file_set import PhotoFileSet
+from .photo_processing import cleanup_memory
 
 class PhotoFrame(QMainWindow):
-    def __init__(self, config_path="config.yaml"):
+    """Main window for the photo frame application."""
+    
+    # Custom signal for when the window is about to close
+    closing = Signal()
+    
+    def __init__(self, config_path: Optional[str] = None):
+        """Initialize the photo frame window.
+        
+        Args:
+            config_path: Path to the configuration file
+        """
         super().__init__()
         
         # Load configuration
-        self.config = Config(config_path)
+        self.config_manager = ConfigManager(config_path)
+        self.config = self.config_manager.get_config()
         
-        self.setWindowTitle("Photo Frame")
-        self.showFullScreen()
-
-        # Setup graphics view and scene
-        self.scene = QGraphicsScene()
-        self.view = QGraphicsView(self.scene)
-        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.view.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.view.setFrameShape(QGraphicsView.Shape.NoFrame)
-        self.setCentralWidget(self.view)
-
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setFocus()
-
-        # Initialize photo display handler
-        self.photo_display = PhotoDisplay(self.scene, self.config)
-
-        # Initialize photo manager
+        # Initialize UI
+        self._init_ui()
+        
+        # Set up photo file set
         self.photo_file_set = PhotoFileSet(
-            self.config.get('photos_directory'),
-            self.config.get('random_order')
+            self.config['photos_directory'],
+            self.config.get('random_order', False)
         )
         
-        # Check if we have photos
-        if not self.photo_file_set.has_photos():
-            print("No image files found in the specified directory.")
-            sys.exit(1)
-        
-        # Set up timer for slideshow
-        self.display_time = self.config.get_display_time_ms()
+        # Set up display and timer
+        self.display_time = self.config_manager.parse_time_string(
+            self.config.get('display_time', '30s')
+        )
         self.timer = QTimer(self)
-        self.timer.setSingleShot(True)
-        self.timer.timeout.connect(self.next_photo)
+        self.timer.timeout.connect(self.show_next_photo)
         
-        # Start the slideshow
-        self.show_photo()
+        # Error tracking
+        self._error_count = 0
+        
+        # Start showing photos
+        if self.photo_file_set.has_photos():
+            self.show_photo()
+            self.timer.start(self.display_time)
+        else:
+            self._handle_empty_directory()
+    
+    def _init_ui(self):
+        """Initialize the user interface."""
+        # Set window properties
+        self.setWindowTitle("VeloFrame")
+        self.resize(1280, 720)
+        
+        # Create graphics view and scene
+        self.view = QGraphicsView(self)
+        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.view.setRenderHint(self.view.RenderHint.Antialiasing)
+        self.view.setRenderHint(self.view.RenderHint.SmoothPixmapTransform)
+        
+        self.scene = QGraphicsScene(self)
+        self.view.setScene(self.scene)
+        
+        # Set up the photo display
+        self.photo_display = PhotoDisplay(self.scene, self.config)
+        
+        # Set the view as the central widget
+        self.setCentralWidget(self.view)
+        
+        # Set up keyboard shortcuts
+        self._setup_actions()
+        
+        # Set up fullscreen
+        if self.config.get('start_fullscreen', False):
+            self.showFullScreen()
+        else:
+            self.show()
+    
+    def _setup_actions(self):
+        """Set up keyboard shortcuts and actions."""
+        # Exit action (Esc)
+        exit_action = QAction("Exit", self)
+        exit_action.setShortcut("Esc")
+        exit_action.triggered.connect(self.close)
+        self.addAction(exit_action)
+        
+        # Toggle fullscreen action (F11)
+        fullscreen_action = QAction("Fullscreen", self)
+        fullscreen_action.setShortcut("F11")
+        fullscreen_action.triggered.connect(self._toggle_fullscreen)
+        self.addAction(fullscreen_action)
+        
+        # Next photo action (Right arrow or Space)
+        next_action = QAction("Next", self)
+        next_action.setShortcuts(["Right", "Space"])
+        next_action.triggered.connect(self.show_next_photo)
+        self.addAction(next_action)
+        
+        # Previous photo action (Left arrow)
+        prev_action = QAction("Previous", self)
+        prev_action.setShortcut("Left")
+        prev_action.triggered.connect(self.show_previous_photo)
+        self.addAction(prev_action)
+    
+    def _toggle_fullscreen(self):
+        """Toggle fullscreen mode."""
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
     
     def show_photo(self, skip_transition=False):
-        # Get current photo path
-        current_photo = self.photo_file_set.get_current_photo_path()
-        if not current_photo:
-            return
-            
+        """Display the current photo.
+        
+        Args:
+            skip_transition: Whether to skip the transition animation
+        """
         try:
-            # Get screen dimensions
-            screen_size = (self.width(), self.height())
-            
-            # Get configuration settings
-            apply_blur = self.config.get('blur_zoom_background', False)
-            show_metadata = self.config.get('show_metadata', False)
-            
-            # Check if we should display a pair of portrait photos
-            show_pair, second_photo = self.photo_file_set.find_portrait_pair(current_photo)
-            
-            # Display the photo with or without transition
-            if show_pair and second_photo:
-                # We're displaying a pair of photos
-                if skip_transition or not hasattr(self, '_first_photo_shown'):
-                    # Skip transition for the first photo or when requested
-                    self.photo_display.show_photo_pair(current_photo, second_photo, screen_size, apply_blur, show_metadata)
-                    self._first_photo_shown = True
-                else:
-                    # Prepare photo details and use transition
-                    photo_details = self.photo_display.photo_prep_manager.prepare_photo_pair(
-                        current_photo, second_photo, screen_size, apply_blur, show_metadata)
-                    self.photo_display.start_photo_transition(photo_details)
+            # Get the current photo path
+            current_photo = self.photo_file_set.get_current_photo_path()
+            if not current_photo:
+                self._handle_empty_directory()
+                return
                 
-                # Skip the next photo in the slideshow since we're showing it now
+            # Check if the photo exists
+            if not os.path.exists(current_photo):
+                print(f"Photo {current_photo} does not exist, skipping")
+                self.photo_file_set.next_photo()
+                self._error_count += 1
+                if self._error_count > 5:
+                    self._handle_empty_directory()
+                    return
+                self.show_photo(skip_transition=True)
+                return
+            
+            # Get screen dimensions
+            screen_size = (self.view.width(), self.view.height())
+            
+            # Check if the current photo is a portrait photo
+            should_pair, next_portrait = self.photo_file_set.find_portrait_pair(current_photo)
+            
+            # Reset error count on success
+            self._error_count = 0
+            
+            # Display the photo(s)
+            if should_pair and next_portrait:
+                # We have a portrait pair
+                if skip_transition:
+                    self.photo_display.show_photo_pair(
+                        current_photo,
+                        next_portrait,
+                        screen_size,
+                        self.config.get('apply_blur_background', True),
+                        self.config.get('show_metadata', True)
+                    )
+                else:
+                    # Prepare photo details for transition
+                    next_photo_details = self.photo_display.photo_prep_manager.prepare_photo_pair(
+                        current_photo,
+                        next_portrait,
+                        screen_size,
+                        self.config.get('apply_blur_background', True),
+                        self.config.get('show_metadata', True)
+                    )
+                    
+                    # Start transition
+                    transition_time = self.config_manager.parse_time_string(
+                        self.config.get('transition_time', '1s')
+                    )
+                    self.photo_display.start_photo_transition(next_photo_details, transition_time)
+                
+                # Move to the next photo after the paired one
                 self.photo_file_set.next_photo()
             else:
-                # We're displaying a single photo
-                if skip_transition or not hasattr(self, '_first_photo_shown'):
-                    # Skip transition for the first photo or when requested
-                    self.photo_display.show_single_photo(current_photo, screen_size, apply_blur, show_metadata)
-                    self._first_photo_shown = True
+                # Single photo display
+                if skip_transition:
+                    self.photo_display.show_single_photo(
+                        current_photo,
+                        screen_size,
+                        self.config.get('apply_blur_background', True),
+                        self.config.get('show_metadata', True)
+                    )
                 else:
-                    # Prepare photo details and use transition
-                    photo_details = self.photo_display.photo_prep_manager.prepare_single_photo(
-                        current_photo, screen_size, apply_blur, show_metadata)
-                    self.photo_display.start_photo_transition(photo_details)
-            
-            # Set up timer for next photo
-            self.timer.stop()
-            self.timer.start(self.display_time)
-            
+                    # Prepare photo details for transition
+                    next_photo_details = self.photo_display.photo_prep_manager.prepare_single_photo(
+                        current_photo,
+                        screen_size,
+                        self.config.get('apply_blur_background', True),
+                        self.config.get('show_metadata', True)
+                    )
+                    
+                    # Start transition
+                    transition_time = self.config_manager.parse_time_string(
+                        self.config.get('transition_time', '1s')
+                    )
+                    self.photo_display.start_photo_transition(next_photo_details, transition_time)
         except Exception as e:
             print(f"Error showing photo {current_photo}: {e}")
             # Improved error recovery to prevent infinite recursion
@@ -117,49 +224,177 @@ class PhotoFrame(QMainWindow):
             if self._error_count > 5:
                 print("Too many consecutive errors. Stopping slideshow.")
                 self._error_count = 0
-                # Reset timer to try again after a delay
                 self.timer.stop()
-                self.timer.start(self.display_time)
+                self._handle_empty_directory()
                 return
                 
             # Try the next photo without transition
             self.show_photo(skip_transition=True)
     
-    def next_photo(self, skip_transition=False):
+    def show_next_photo(self):
+        """Show the next photo in the sequence."""
+        # Move to the next photo
         self.photo_file_set.next_photo()
-        self.show_photo(skip_transition)
-
-    def previous_photo(self, skip_transition=False):
+        
+        # Display it
+        self.show_photo()
+        
+        # Restart the timer
+        self.timer.start(self.display_time)
+    
+    def show_previous_photo(self):
+        """Show the previous photo in the sequence."""
+        # Move to the previous photo
         self.photo_file_set.previous_photo()
-        self.show_photo(skip_transition)
         
-    def _show_photo_immediately(self):
-        """Show the next photo immediately, skipping any transition"""
-        # Stop any ongoing transition
-        if hasattr(self.photo_display, 'in_transition') and self.photo_display.in_transition:
-            # In the refactored version, we don't directly access fade_animation_group
-            # Instead we'll rely on the next photo with skip_transition=True
-            # which will properly handle the transition state
-            pass
+        # Display it
+        self.show_photo()
         
-        # Get the next photo with transition skipped
-        self.next_photo(skip_transition=True)
-
-    def keyPressEvent(self, event):
-        # Exit on Escape key
-        if event.key() == Qt.Key.Key_Escape:
-            self.close()
-        # Move to next photo on Space or Right arrow
-        elif event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Right):
-            # Skip transition if Shift is held
-            skip_transition = event.modifiers() & Qt.KeyboardModifier.ShiftModifier
-            self.next_photo(skip_transition)
-        # Move to previous photo on Left arrow
-        elif event.key() == Qt.Key.Key_Left:
-            # Skip transition if Shift is held
-            skip_transition = event.modifiers() & Qt.KeyboardModifier.ShiftModifier
-            self.previous_photo(skip_transition)
-
+        # Restart the timer
+        self.timer.start(self.display_time)
+    
+    def _handle_empty_directory(self):
+        """Handle the case when the photo directory is empty or inaccessible."""
+        # Stop the timer
+        self.timer.stop()
+        
+        # Create a widget to display a message and options
+        message_widget = QWidget()
+        layout = QVBoxLayout(message_widget)
+        
+        # Add a message
+        message = QLabel("No photos found in the configured directory.")
+        message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        message.setStyleSheet("font-size: 18px; color: white;")
+        layout.addWidget(message)
+        
+        directory_label = QLabel(f"Current directory: {self.config['photos_directory']}")
+        directory_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        directory_label.setStyleSheet("font-size: 14px; color: white;")
+        layout.addWidget(directory_label)
+        
+        # Add buttons
+        button_layout = QHBoxLayout()
+        
+        browse_button = QPushButton("Browse for Photos Directory")
+        browse_button.clicked.connect(self._browse_for_directory)
+        button_layout.addWidget(browse_button)
+        
+        retry_button = QPushButton("Retry Current Directory")
+        retry_button.clicked.connect(self._retry_current_directory)
+        button_layout.addWidget(retry_button)
+        
+        exit_button = QPushButton("Exit")
+        exit_button.clicked.connect(self.close)
+        button_layout.addWidget(exit_button)
+        
+        layout.addLayout(button_layout)
+        
+        # Set the widget as the central widget
+        self.setCentralWidget(message_widget)
+        
+        # Set background color
+        message_widget.setStyleSheet("background-color: #1e1e1e;")
+    
+    def _browse_for_directory(self):
+        """Open a file dialog to browse for a new photos directory."""
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Photos Directory",
+            os.path.expanduser("~"),
+            QFileDialog.Option.ShowDirsOnly
+        )
+        
+        if directory:
+            # Update the configuration
+            self.config['photos_directory'] = directory
+            self.config_manager.save_config(self.config)
+            
+            # Reinitialize the photo file set
+            self.photo_file_set = PhotoFileSet(
+                directory,
+                self.config.get('random_order', False)
+            )
+            
+            # Reset the UI
+            self._init_ui()
+            
+            # Start showing photos if there are any
+            if self.photo_file_set.has_photos():
+                self.show_photo(skip_transition=True)
+                self.timer.start(self.display_time)
+            else:
+                self._handle_empty_directory()
+    
+    def _retry_current_directory(self):
+        """Retry loading photos from the current directory."""
+        # Rescan the directory
+        self.photo_file_set.rescan_directory()
+        
+        # Reset the UI
+        self._init_ui()
+        
+        # Start showing photos if there are any
+        if self.photo_file_set.has_photos():
+            self.show_photo(skip_transition=True)
+            self.timer.start(self.display_time)
+        else:
+            self._handle_empty_directory()
+    
+    def resizeEvent(self, event: QResizeEvent):
+        """Handle window resize events.
+        
+        Args:
+            event: The resize event
+        """
+        super().resizeEvent(event)
+        
+        # Update the view to match the window size
+        self.view.setSceneRect(0, 0, event.size().width(), event.size().height())
+        
+        # If we have a current photo, redisplay it to fit the new size
+        if hasattr(self, 'photo_file_set') and self.photo_file_set.has_photos():
+            # Use a short delay to avoid multiple redraws during resize
+            QTimer.singleShot(100, lambda: self.show_photo(skip_transition=True))
+    
+    def keyPressEvent(self, event: QKeyEvent):
+        """Handle key press events.
+        
+        Args:
+            event: The key press event
+        """
+        super().keyPressEvent(event)
+    
+    def closeEvent(self, event):
+        """Handle window close events.
+        
+        Args:
+            event: The close event
+        """
+        # Emit the closing signal
+        self.closing.emit()
+        
+        # Stop the timer
+        self.timer.stop()
+        
+        # Clean up resources
+        self._cleanup_resources()
+        
+        # Accept the close event
+        event.accept()
+    
+    def _cleanup_resources(self):
+        """Clean up resources before closing."""
+        # Clear the photo display's cache
+        if hasattr(self, 'photo_display') and hasattr(self.photo_display, 'photo_prep_manager'):
+            self.photo_display.photo_prep_manager.clear_cache()
+        
+        # Clean up any remaining PIL images
+        cleanup_memory()
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
 
 def main():
     app = QApplication(sys.argv)
@@ -169,7 +404,6 @@ def main():
     photo_frame = PhotoFrame(config_path)
     
     sys.exit(app.exec())
-
 
 if __name__ == "__main__":
     main()
