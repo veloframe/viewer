@@ -169,3 +169,29 @@ class TransitionManager:
             callback: Function to call to update metadata
         """
         self.update_metadata_callback = callback
+
+    def cancel_transition(self):
+        """Cancel any ongoing transition animations.
+        
+        This method stops all animations and resets the transition state.
+        It should be called before starting a new transition if one is already in progress.
+        """
+        if not self.in_transition:
+            return
+            
+        # Stop the animation group
+        self.fade_animation_group.stop()
+        
+        # Disconnect any connected signals to prevent callbacks
+        try:
+            if self.fade_animation_group.signalsBlocked() == False:
+                self.fade_animation_group.finished.disconnect(self._on_transition_finished)
+        except RuntimeError:
+            # Ignore errors if the signal wasn't connected
+            pass
+            
+        # Reset the animation group
+        self.fade_animation_group = QParallelAnimationGroup()
+        
+        # Reset transition state
+        self.in_transition = False

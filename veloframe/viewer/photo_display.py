@@ -77,6 +77,17 @@ class PhotoDisplay:
             next_photo_details: Details of the next photo to display
             duration: Duration of the transition in milliseconds, or None to use config value
         """
+        # If we're already in a transition, properly cancel it first
+        if self.in_transition:
+            # Stop the current transition animation
+            self.transition_manager.cancel_transition()
+            
+            # If we were transitioning to a different photo than the one we're now
+            # transitioning to, we need to clean up resources
+            if self.next_photo_details and next_photo_details != self.next_photo_details:
+                # Clean up any resources from the previous next_photo_details if needed
+                pass
+        
         # Store state
         self.next_photo_details = next_photo_details
         self.in_transition = True
