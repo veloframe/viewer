@@ -199,9 +199,11 @@ class PhotoDisplay:
         # Swap layers in UI manager
         self.ui_manager.swap_layers(self.next_photo_details['mode'])
         
-        # Update state
+        # Update current photo details
         self.current_photo_details = self.next_photo_details
         self.next_photo_details = None
+        
+        # Reset transition state
         self.in_transition = False
         
         # Show clock if enabled
