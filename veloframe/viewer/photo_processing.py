@@ -18,6 +18,7 @@ def load_photo(photo_path: str, screen_size: Optional[Tuple[int, int]] = None, a
         Tuple of (processed PIL image, EXIF data dictionary)
     """
     # Load image with PIL for processing
+    Image.MAX_IMAGE_PIXELS = None # Allow loading large images, unsafe for untrusted images
     pil_img = Image.open(photo_path)
     
     # Process EXIF data
