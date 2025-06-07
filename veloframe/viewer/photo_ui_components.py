@@ -16,6 +16,9 @@ class UIComponentManager:
         """
         self.scene = scene
         
+        # Set scene background to black
+        self.scene.setBackgroundBrush(QBrush(QColor(0, 0, 0)))
+        
         # Create separate image items for current and next photos
         # Current photos (initially visible)
         self.current_image_left = QGraphicsPixmapItem()
@@ -89,6 +92,8 @@ class UIComponentManager:
             height: Height of the scene
         """
         self.scene.setSceneRect(0, 0, width, height)
+        # Ensure the background color remains black when resizing
+        self.scene.setBackgroundBrush(QBrush(QColor(0, 0, 0)))
     
     def set_single_photo(self, is_current, pixmap, x, y):
         """Set a single photo's pixmap and position.
