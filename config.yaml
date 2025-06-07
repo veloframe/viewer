@@ -1,5 +1,5 @@
 # Photo Frame Configuration
-photos_directory: "C:/Users/marti/Pictures"  # Path to directory containing photos
+photos_directory: "./fonts/roboto.ttf"  # Path to directory containing photos
 display_time: "10s"                           # Time to display each photo (s=seconds, m=minutes, h=hours, d=days)
 transition_time: "5s"                         # Transition time between photos (s=seconds, m=minutes, h=hours)
 random_order: true                           # Whether to randomize photo order
