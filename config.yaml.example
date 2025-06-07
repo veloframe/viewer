@@ -1,5 +1,5 @@
 # Photo Frame Configuration
-photos_directory: "./fonts/roboto.ttf"  # Path to directory containing photos
+photos_directory: "~/Photoframe/All photos"  # Path to directory containing photos
 display_time: "10s"                           # Time to display each photo (s=seconds, m=minutes, h=hours, d=days)
 transition_time: "5s"                         # Transition time between photos (s=seconds, m=minutes, h=hours)
 random_order: true                           # Whether to randomize photo order
@@ -8,13 +8,13 @@ blur_zoom_background: true                   # Apply blurred zoom background for
 # Metadata Overlay Settings
 show_metadata: true                          # Show photo metadata overlay
 metadata_opacity: 50                         # Opacity of metadata overlay (0-100)
-metadata_font: "segoeui.ttf"                 # Font for metadata overlay
+metadata_font: "./fonts/roboto.ttf"                 # Font for metadata overlay
 metadata_point_size: 12                      # Point size for metadata font
 
 # Clock Overlay Settings
 show_clock: true                             # Show clock overlay
 clock_position: "top-right"                   # Clock position (top-left, top-center, top-right, bottom-center)
 clock_opacity: 50                             # Opacity of clock overlay (0-100)
-clock_font: "segoeui.ttf"                    # Font for clock overlay
+clock_font: "./fonts/roboto.ttf"                    # Font for clock overlay
 clock_point_size: 12                         # Point size for clock font
 clock_format: "HH:mm ddd D MMM"               # Clock format (Arrow format)
