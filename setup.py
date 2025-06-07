@@ -1,8 +1,10 @@
 from setuptools import setup, find_packages
 
+__version__ = "0.1.0"
+
 setup(
     name="veloframe",
-    version="0.1.0",
+    version=__version__,
     description="A beautiful, full-screen photo frame application",
     author="Martin Maisey",
     packages=find_packages(),
